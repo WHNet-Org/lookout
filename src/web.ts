@@ -152,9 +152,11 @@ const legend = `<ul class="legend" aria-label="History legend">
 </ul>`;
 
 const defaultBuild = createBuildInfo();
+const sourceRepository = "https://github.com/WHNet-Org/lookout";
 
 function page(options: WebOptions, title: string, contents: string, section?: "status" | "embed"): string {
   const { version, revision } = options.buildInfo ?? defaultBuild;
+  const sourceUrl = revision ? `${sourceRepository}/tree/${revision}` : sourceRepository;
   const scripts = section === "status" ? ['<script type="module" src="/assets/dashboard.js"></script>']
     : section === "embed" ? ['<script type="module" src="/assets/lookout-status.js"></script>', '<script type="module" src="/assets/embed-guide.js"></script>']
       : [];
@@ -183,7 +185,7 @@ function page(options: WebOptions, title: string, contents: string, section?: "s
       <a class="brand" href="/"><img src="/assets/lookout.svg" width="32" height="32" alt="">Lookout</a>
       <p class="build-label">v${escapeHtml(version)}${revision ? ` · <code title="${escapeHtml(revision)}">${escapeHtml(revision.slice(0, 7))}</code>` : ""}</p>
     </div>
-    <nav class="footer-nav" aria-label="Project links"><a href="https://whnet.ca/">WHNet</a><a href="https://github.com/WHNet-Org/lookout">Source</a></nav>
+    <nav class="footer-nav" aria-label="Project links"><a href="https://whnet.ca/">WHNet</a><a href="${escapeHtml(sourceUrl)}">Source code</a></nav>
   </div></footer>
 </body>
 </html>`;

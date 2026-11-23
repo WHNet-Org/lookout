@@ -57,6 +57,7 @@ const assets = new Map([
   ["/assets/lookout-status.js", "text/javascript; charset=utf-8"],
   ["/assets/lookout-status.css", "text/css; charset=utf-8"],
   ["/assets/whnet-mosaic-LICENSE.txt", "text/plain; charset=utf-8"],
+  ["/assets/re2js-LICENSE.txt", "text/plain; charset=utf-8"],
 ]);
 
 function connectTcp(host: string, port: number, signal: AbortSignal): Promise<void> {

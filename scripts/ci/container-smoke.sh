@@ -61,6 +61,7 @@ start_app() {
 }
 
 start_app
+docker exec "$app" test -s /app/LICENSE
 docker exec "$app" node --input-type=module -e '
     import assert from "node:assert/strict";
     import { DatabaseSync } from "node:sqlite";
