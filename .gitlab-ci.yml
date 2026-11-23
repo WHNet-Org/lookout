@@ -1,0 +1,24 @@
+stages: [verify, deploy]
+
+default:
+  image: node:24-bookworm
+
+verify:
+  stage: verify
+  script:
+    - npm ci
+    - npm run validate
+    - npm run typecheck
+    - npm test
+    - npm run test:worker
+    - npm run deploy -- --dry-run
+
+deploy:
+  stage: deploy
+  resource_group: lookout-production
+  environment: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true" && $LOOKOUT_PRODUCTION_READY == "1"'
+  script:
+    - npm ci
+    - npm run deploy

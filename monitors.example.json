@@ -1,0 +1,45 @@
+{
+  "checks": [
+    {
+      "id": "shared-origin",
+      "name": "Shared origin",
+      "visibility": "private",
+      "type": "tcp",
+      "host": "example.com",
+      "port": 443
+    },
+    {
+      "id": "whnet-site",
+      "name": "WHNet",
+      "visibility": "public",
+      "type": "http",
+      "url": "https://whnet.ca/",
+      "expectedCodes": [200],
+      "dependsOn": ["shared-origin"]
+    },
+    {
+      "id": "api",
+      "name": "Example API",
+      "visibility": "public",
+      "type": "http",
+      "url": "https://example.com/health",
+      "bodyRegex": "\\{\"status\"\\s*:\\s*\"ok\"\\}",
+      "headers": { "Authorization": { "secret": "LOOKOUT_PROBE_AUTH" } },
+      "dependsOn": ["shared-origin"],
+      "alertGroup": "whnet"
+    }
+  ],
+  "groups": [
+    {
+      "id": "whnet",
+      "name": "WHNet services",
+      "checks": ["whnet-site", "api", "shared-origin"],
+      "visibility": "detailed",
+      "alert": { "threshold": 3 }
+    }
+  ],
+  "defaultGroup": "whnet",
+  "allowedOrigins": ["https://whnet.ca"],
+  "alert": { "threshold": 2 },
+  "webhook": { "format": "json", "urlSecret": "LOOKOUT_WEBHOOK_URL" }
+}

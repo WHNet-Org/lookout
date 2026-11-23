@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 36" preserveAspectRatio="none">
+<!-- Poulpe web/src/components/ui/MosaicBar.tsx: original positions, blend=0; WHNet artwork. -->
+<rect width="1200" height="36" fill="#3D3376"/>
+<polygon points="0,0 120,0 75,36 -45,36" fill="#A72B80"/>
+<polygon points="120,0 220,0 175,36 75,36" fill="#F73FA0"/>
+<polygon points="220,0 340,0 295,36 175,36" fill="#E11081"/>
+<polygon points="340,0 480,0 435,36 295,36" fill="#A72B80"/>
+<polygon points="480,0 540,0 495,36 435,36" fill="#3D3376"/>
+<polygon points="540,0 680,0 635,36 495,36" fill="#0F6795"/>
+<polygon points="680,0 800,0 755,36 635,36" fill="#0DE1D0"/>
+<polygon points="800,0 940,0 895,36 755,36" fill="#228ABA"/>
+<polygon points="940,0 1020,0 975,36 895,36" fill="#3D3376"/>
+<polygon points="1020,0 1140,0 1095,36 975,36" fill="#FB8F23"/>
+<polygon points="1140,0 1200,0 1155,36 1095,36" fill="#FEAB24"/>
+</svg>

@@ -1,0 +1,172 @@
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { chromium } from "playwright-core";
+import { eventually, fixtureConfig, fixtureServer, launch } from "../test/support.ts";
+
+const fixture = await fixtureServer();
+const directory = mkdtempSync(join(tmpdir(), "lookout-browser-"));
+const configPath = join(directory, "monitors.json");
+const config = fixtureConfig(fixture.origin, fixture.port, 6);
+config.groups.push({ id: "edge-group", name: "Edge infrastructure", visibility: "detailed", checks: ["edge"] });
+writeFileSync(configPath, JSON.stringify(config));
+const server = launch(process.execPath, ["src/node.ts"], {
+  env: { ...process.env, PORT: "0", LOOKOUT_CONFIG: configPath, LOOKOUT_DB: join(directory, "lookout.sqlite") },
+});
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ??
+  (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
+const artifacts = resolve(".artifacts", "browser");
+mkdirSync(artifacts, { recursive: true });
+let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+
+try {
+  const [, port] = await server.match(/Lookout listening on 127\.0\.0\.1:(\d+)/u);
+  const origin = `http://127.0.0.1:${port}`;
+  assert(await eventually(async () => {
+    const result = await fetch(`${origin}/api/status`);
+    return (await result.json()).status === "degraded";
+  }), server.output());
+
+  browser = await chromium.launch({ executablePath });
+  const noScript = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 900 } });
+  const mobile = await noScript.newPage();
+  await mobile.goto(origin);
+  assert(await mobile.getByRole("heading", { name: "Some services are degraded" }).isVisible());
+  assert(await mobile.getByRole("link", { name: "Refresh status" }).isVisible());
+  assert.equal(await mobile.getByRole("link", { name: "Edge gateway" }).count(), 2);
+  assert(await mobile.locator(".check-membership").getByRole("link", { name: "Edge gateway" }).isVisible());
+  await mobile.screenshot({ path: join(artifacts, "mobile.png"), fullPage: true });
+  await mobile.getByRole("link", { name: "Web application" }).click();
+  assert(await mobile.getByRole("heading", { name: "Daily summary" }).isVisible());
+  assert(await mobile.getByRole("heading", { name: "Minute results" }).isVisible());
+  await noScript.close();
+
+  const page = await browser.newPage({ viewport: { width: 1400, height: 1050 } });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const clockStart = Date.parse("2026-11-23T12:00:00Z");
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(clockStart + 1000);
+  await page.goto(origin);
+  await page.screenshot({ path: join(artifacts, "desktop.png"), fullPage: true });
+  await page.keyboard.press("Tab");
+  assert(await page.getByRole("link", { name: "Skip to content" }).evaluate((node) => node === document.activeElement));
+  await page.keyboard.press("Enter");
+  const additionalMembership = page.locator(".check-membership").getByRole("link", { name: "Edge gateway" });
+  await additionalMembership.focus();
+  assert(await additionalMembership.evaluate((node) => node === document.activeElement));
+  const check = page.getByRole("link", { name: "Web application" });
+  await check.focus();
+  assert(await check.evaluate((node) => node === document.activeElement));
+
+  await page.route(`${origin}/`, (route) => route.fulfill({ status: 503, body: "Unavailable" }));
+  await page.clock.runFor(60_000);
+  await page.getByText(/Unable to refresh\. Showing the snapshot from/u).waitFor();
+  await page.unroute(`${origin}/`);
+  const slowDashboard = Promise.withResolvers<void>();
+  let dashboardRequests = 0;
+  await page.route(`${origin}/`, async (route) => {
+    const attempt = ++dashboardRequests;
+    if (attempt === 1) await slowDashboard.promise;
+    const status = attempt === 1 ? "operational" : "outage";
+    const label = attempt === 1 ? "All systems operational" : "Service outage";
+    const response = await route.fetch();
+    const source = await response.text();
+    const html = source
+      .replace('data-status="degraded"', `data-status="${status}"`)
+      .replace('data-status-label="Some services are degraded"', `data-status-label="${label}"`)
+      .replace("<h2>Some services are degraded</h2>", `<h2>${label}</h2>`);
+    await route.fulfill({ response, body: html });
+  });
+  await page.clock.runFor(60_000);
+  assert(await eventually(() => dashboardRequests === 1));
+  await page.clock.runFor(500);
+  slowDashboard.resolve();
+  await page.getByRole("heading", { name: "All systems operational" }).waitFor();
+  assert(await check.evaluate((node) => node === document.activeElement));
+  assert.equal(await page.locator("[data-announcement]").textContent(), "All systems operational");
+  assert(!(await page.locator("[data-refresh-warning]").isVisible()));
+
+  await page.setViewportSize({ width: 1400, height: 600 });
+  const scrollPosition = await page.evaluate(() => {
+    window.scrollTo(0, 125);
+    return window.scrollY;
+  });
+  assert(scrollPosition > 0);
+  await page.clock.runFor(59_500);
+  await page.getByRole("heading", { name: "Service outage" }).waitFor({ timeout: 5000 });
+  assert.equal(dashboardRequests, 2);
+  assert.equal(await page.evaluate(() => window.scrollY), scrollPosition);
+  assert(await check.evaluate((node) => node === document.activeElement));
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(120_000);
+  assert.equal(dashboardRequests, 2);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(1);
+  assert(await eventually(() => dashboardRequests === 3));
+
+  await page.setViewportSize({ width: 320, height: 850 });
+  await page.emulateMedia({ forcedColors: "active" });
+  assert(await check.isVisible());
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(await page.locator(".mast").evaluate((element) =>
+    getComputedStyle(element).backgroundImage + "/" + getComputedStyle(element, "::before").backgroundImage), "none/none");
+  assert.deepEqual(errors, []);
+
+  const chip = await browser.newPage();
+  await chip.clock.install({ time: clockStart });
+  await chip.clock.pauseAt(clockStart + 1000);
+  await chip.route(`${origin}/chip-demo`, (route) => route.fulfill({
+    contentType: "text/html",
+    body: '<a href="/" data-lookout-summary="/chip-status"><span data-lookout-label>Service status</span></a><script type="module" src="/chip-script.js"></script>',
+  }));
+  await chip.route(`${origin}/chip-script.js`, (route) => route.fulfill({
+    contentType: "text/javascript",
+    body: readFileSync("examples/whnet-chip.js", "utf8"),
+  }));
+  const slowChip = Promise.withResolvers<void>();
+  let chipRequests = 0;
+  await chip.route(`${origin}/chip-status`, async (route) => {
+    if (++chipRequests === 1) {
+      await slowChip.promise;
+      await route.fulfill({ json: { online: true, status: "operational" } });
+      return;
+    }
+    await route.fulfill({ status: 503 });
+  });
+  await chip.goto(`${origin}/chip-demo`);
+  await chip.clock.runFor(1);
+  assert(await eventually(() => chipRequests === 1));
+  await chip.clock.runFor(500);
+  slowChip.resolve();
+  await chip.getByRole("link", { name: "All systems operational" }).waitFor();
+  await chip.clock.runFor(59_500);
+  await chip.getByRole("link", { name: "Status unavailable" }).waitFor({ timeout: 5000 });
+  assert.equal(chipRequests, 2);
+  assert.equal(await chip.getByRole("link", { name: "Status unavailable" }).getAttribute("href"), "/");
+
+  const siblingFolder = resolve("../whnet.ca/src/brand/listings");
+  const logoSamples = ["taida", "qiao", "northstar", "spotistats"].map((id) => join(siblingFolder, `${id}.svg`));
+  if (logoSamples.every(existsSync)) {
+    const samples = ["public/assets/lookout.svg", ...logoSamples].map((file) => readFileSync(file).toString("base64"));
+    const brand = await browser.newPage({ viewport: { width: 420, height: 150 } });
+    await brand.setContent(`<body style="background:#161616;padding:16px">${[16, 32].map((size) =>
+      `<p style="display:flex;gap:12px;align-items:center">${samples.map((src) =>
+        `<img src="data:image/svg+xml;base64,${src}" width="${size}" height="${size}">`).join("")}</p>`).join("")}</body>`);
+    await brand.screenshot({ path: join(artifacts, "brand-family.png") });
+  }
+  console.log(`Browser layout, keyboard, forced colors, no-JS, refresh, and branding passed. Screenshots in ${artifacts}`);
+} finally {
+  await browser?.close();
+  await server.stop();
+  await fixture.close();
+  rmSync(directory, { recursive: true, force: true });
+}
