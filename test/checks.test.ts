@@ -125,7 +125,8 @@ test("an inspect-first check does not read Location from a redirect response", a
 });
 
 test("retains status codes on regex mismatch, body overflow and body timeout", async () => {
-  const config = validateConfig({ checks: [{ ...http, bodyRegex: "^ready\\n?$", timeoutMs: 40 }] });
+  const check = { ...http, bodyRegex: "^ready\\n?$" };
+  const config = validateConfig({ checks: [check] });
   for (const [response, code, reason] of [
     [new Response("ready\n", { status: 200 }), 200, undefined],
     [new Response("ready\nextra", { status: 200 }), 200, "body_mismatch"],
@@ -139,7 +140,8 @@ test("retains status codes on regex mismatch, body overflow and body timeout", a
   }
   let cancelled = false;
   const hangingBody = new ReadableStream({ cancel: () => { cancelled = true; } });
-  const timedOut = await runProbes(config, probeOptions(async () => new Response(hangingBody)));
+  const shortDeadline = validateConfig({ checks: [{ ...check, timeoutMs: 40 }] });
+  const timedOut = await runProbes(shortDeadline, probeOptions(async () => new Response(hangingBody)));
   assert.equal(timedOut.app.reason, "timeout");
   assert.equal(timedOut.app.httpCode, 200);
   assert.equal(cancelled, true);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createBuildInfo } from "../src/build-info.ts";
 import { validateConfig } from "../src/config.ts";
 import { fixtureConfig, fixtureServer, fetchReady, launch } from "../test/support.ts";
 import { splitWorker, writeWorkerEntry } from "./worker-bundle.ts";
@@ -14,6 +15,7 @@ const persistence = join(directory, "state");
 const cli = resolve("node_modules/wrangler/bin/wrangler.js");
 const env = { ...process.env, WRANGLER_SEND_METRICS: "false" };
 const args = ["--config", configFile, "--persist-to", persistence];
+const revision = "a".repeat(40);
 
 let worker: ReturnType<typeof launch> | undefined;
 try {
@@ -23,7 +25,7 @@ try {
   const monitors = fixtureConfig(fixture.origin, fixture.port);
   const nativeBodyCheck = monitors.checks.find(({ id }) => id === "service-1")!;
   nativeBodyCheck.bodyRegex = '^\\{"padding":"';
-  config.main = writeWorkerEntry(process.cwd(), directory, "worker", validateConfig(monitors));
+  config.main = writeWorkerEntry(process.cwd(), directory, "worker", validateConfig(monitors), revision);
   config.assets.directory = resolve("public");
   config.d1_databases[0].migrations_dir = resolve("migrations");
   config.vars = { LOOKOUT_WEBHOOK_URL: `${fixture.origin}/webhook` };
@@ -69,6 +71,17 @@ try {
   assert.equal(response.headers.get("access-control-allow-origin"), "https://whnet.ca");
   assert.deepEqual(await response.json(), { status: "degraded", online: false });
   assert.deepEqual(await (await fetch(`${origin}/api/status?group=internal-group`)).json(), { status: "operational", online: true });
+  assert.deepEqual(await (await fetch(`${origin}/healthz`)).json(), createBuildInfo(revision));
+  const crossOrigin = { Origin: "https://consumer.example" };
+  const embed = await fetch(`${origin}/api/v1/status?check=edge`, { headers: crossOrigin });
+  assert.equal(embed.headers.get("access-control-allow-origin"), "*");
+  assert.deepEqual(await embed.json(), { status: "outage", online: false });
+  for (const asset of ["lookout-status.js", "lookout-status.css"]) {
+    const resource = await fetch(`${origin}/assets/${asset}`, { headers: crossOrigin });
+    assert.equal(resource.status, 200);
+    assert.equal(resource.headers.get("access-control-allow-origin"), "*");
+    await resource.body?.cancel();
+  }
   assert.match(await (await fetch(`${origin}/monitors/application`)).text(), /503/u);
   assert.equal((await fetch(`${origin}/monitors/hidden-listener`)).status, 404);
   assert.equal((await fetch(`${origin}/assets/lookout.svg`)).status, 200);

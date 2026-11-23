@@ -1,3 +1,4 @@
+import { createBuildInfo, type BuildInfo } from "./build-info.ts";
 import {
   DAY_MS,
   MINUTE_MS,
@@ -38,6 +39,7 @@ const failureReasons: Readonly<Record<string, string>> = {
 interface WebOptions {
   config: Config;
   store: Store;
+  buildInfo?: BuildInfo;
   now?: () => number;
   privateUser?: string;
   privatePassword?: string;
@@ -149,7 +151,13 @@ const legend = `<ul class="legend" aria-label="History legend">
   <li class="tone-unknown"><span class="legend-sample has-gap" aria-hidden="true"></span> Partial data</li>
 </ul>`;
 
-function page(title: string, contents: string, dashboard = false): string {
+const defaultBuild = createBuildInfo();
+
+function page(options: WebOptions, title: string, contents: string, section?: "status" | "embed"): string {
+  const { version, revision } = options.buildInfo ?? defaultBuild;
+  const scripts = section === "status" ? ['<script type="module" src="/assets/dashboard.js"></script>']
+    : section === "embed" ? ['<script type="module" src="/assets/lookout-status.js"></script>', '<script type="module" src="/assets/embed-guide.js"></script>']
+      : [];
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -157,20 +165,70 @@ function page(title: string, contents: string, dashboard = false): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)} · Lookout</title>
   <link rel="icon" type="image/svg+xml" href="/assets/lookout.svg">
-  <link rel="stylesheet" href="/assets/styles.css">${dashboard ? '\n  <script type="module" src="/assets/dashboard.js"></script>' : ""}
+  <link rel="stylesheet" href="/assets/mosaic.css">
+  <link rel="stylesheet" href="/assets/styles.css">
+  ${scripts.join("\n  ")}
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
-  <header class="mast"><div class="wrap mast-inner"><a class="brand" href="/"><img src="/assets/lookout.svg" width="28" height="28" alt="">Lookout</a></div></header>
+  <header class="mast"><div class="wrap mast-inner">
+    <a class="brand" href="/"><img src="/assets/lookout.svg" width="32" height="32" alt="">Lookout</a>
+    <nav class="mast-nav" aria-label="Lookout"><a href="/"${section === "status" ? ' aria-current="page"' : ""}>Status</a><a href="/embed"${section === "embed" ? ' aria-current="page"' : ""}>Embed</a></nav>
+  </div></header>
   <main class="wrap main" id="main" tabindex="-1">
   ${contents}
   </main>
+  <footer class="site-footer"><div class="wrap footer-inner">
+    <div class="footer-identity">
+      <a class="brand" href="/"><img src="/assets/lookout.svg" width="32" height="32" alt="">Lookout</a>
+      <p class="build-label">v${escapeHtml(version)}${revision ? ` · <code title="${escapeHtml(revision)}">${escapeHtml(revision.slice(0, 7))}</code>` : ""}</p>
+    </div>
+    <nav class="footer-nav" aria-label="Project links"><a href="https://whnet.ca/">WHNet</a><a href="https://github.com/WHNet-Org/lookout">Source</a></nav>
+  </div></footer>
 </body>
 </html>`;
 }
 
 function checkPath(check: Check, operator = false): string {
   return `${operator ? "/private" : ""}/monitors/${encodeURIComponent(check.id)}`;
+}
+
+function groupAnchor(id: string): string {
+  return `group-${encodeURIComponent(id)}`;
+}
+
+function embedPage(options: WebOptions): string {
+  const exampleOrigin = "https://status.example.com";
+  const check = options.config.checks.find((candidate) => candidate.visibility === "public");
+  const group = options.config.groups.find((candidate) => candidate.visibility !== "private");
+  const samples = [
+    { title: "Overall status", label: "Service status", scope: "", path: "/", variant: "badge", preview: true },
+    {
+      title: "Service group", label: group?.name ?? "Services", scope: ` group="${escapeHtml(group?.id ?? "my-group")}"`,
+      path: `/#${groupAnchor(group?.id ?? "my-group")}`, variant: "card", preview: Boolean(group),
+    },
+    {
+      title: "Single check", label: check?.name ?? "Service", scope: ` check="${escapeHtml(check?.id ?? "my-check")}"`,
+      path: check ? checkPath(check) : "/monitors/my-check", variant: "badge", preview: Boolean(check),
+    },
+  ];
+  const cards = samples.map(({ title, label, scope, path, variant, preview }) => {
+    const markup = (origin: string) => `<lookout-status${scope} variant="${variant}" label="${escapeHtml(label)}">
+  <a href="${origin}${path}">${escapeHtml(label)}</a>
+</lookout-status>`;
+    const code = `<script type="module" src="${exampleOrigin}/assets/lookout-status.js"></script>
+${markup(exampleOrigin)}`;
+    return `<article class="panel embed-example">
+      <div class="embed-example-head"><h2>${title}</h2><button type="button" class="quiet-control" data-embed-copy aria-label="Copy ${title.toLowerCase()} code" hidden>Copy</button></div>
+      ${preview ? `<div class="embed-preview">${markup("")}</div>` : ""}
+      <pre tabindex="0" aria-label="${title} code"><code data-embed-code>${escapeHtml(code)}</code></pre>
+    </article>`;
+  });
+  return page(options, "Embed status", `<div class="page-heading"><h1>Embed status</h1></div>
+  <p class="secondary embed-intro">Add a live Lookout badge or card to another website. Load the module once per page. Use a published check or group ID, or omit both for overall status.</p>
+  <div class="embed-examples">${cards.join("")}</div>
+  <p class="embed-note secondary">If your site uses a Content Security Policy, allow this Lookout origin in <code>script-src</code>, <code>style-src</code>, and <code>connect-src</code>.</p>
+  <p data-embed-feedback role="status" class="sr-only"></p>`, "embed");
 }
 
 function checkLink(check: Check, placement: string, operator = false): string {
@@ -248,7 +306,7 @@ async function dashboard(options: WebOptions, now: number): Promise<string> {
         members.push(`<li>${checkRow(check, placement, view)}</li>`);
       }
     }
-    return `<li class="panel"><div class="group-top"><div class="row-info"><h3>${escapeHtml(group.name)}</h3><p class="secondary">${badge(groupState(group, results))}</p></div>${historyStrip(groupRollups.get(group.id), now)}</div>${members.length ? `<ul class="group-members">${members.join("")}</ul>` : ""}</li>`;
+    return `<li class="panel" id="${groupAnchor(group.id)}"><div class="group-top"><div class="row-info"><h3>${escapeHtml(group.name)}</h3><p class="secondary">${badge(groupState(group, results))}</p></div>${historyStrip(groupRollups.get(group.id), now)}</div>${members.length ? `<ul class="group-members">${members.join("")}</ul>` : ""}</li>`;
   });
   const ungrouped = visibleChecks.filter((check) => !groupedChecks.has(check.id));
   const renderedAt = new Date(now).toISOString();
@@ -258,7 +316,7 @@ async function dashboard(options: WebOptions, now: number): Promise<string> {
     ${ungrouped.length ? `<section class="section" aria-labelledby="public-checks-title"><div class="section-heading"><h2 id="public-checks-title">Services</h2><p class="secondary">Past seven days · UTC</p></div><ul class="ungrouped">${ungrouped.map((check) => `<li class="panel">${checkRow(check, "public", view)}</li>`).join("")}</ul></section>` : ""}
     ${groups.length || ungrouped.length ? legend : '<p class="section panel empty secondary">No services are published.</p>'}
   </div>`;
-  return page("Service status", `<div class="page-heading"><h1>Service status</h1><div class="page-actions"><span class="snapshot" data-snapshot>Updated ${time(now)}</span><a href="/" class="quiet-control">Refresh status</a></div></div><p class="sr-only" data-announcement role="status" aria-atomic="true"></p><p class="snapshot-warning" data-refresh-warning role="status" hidden></p>${everything}`, true);
+  return page(options, "Service status", `<div class="page-heading"><h1>Service status</h1><div class="page-actions"><span class="snapshot" data-snapshot>Updated ${time(now)}</span><a href="/" class="quiet-control">Refresh status</a></div></div><p class="sr-only" data-announcement role="status" aria-atomic="true"></p><p class="snapshot-warning" data-refresh-warning role="status" hidden></p>${everything}`, "status");
 }
 
 async function operatorPage(options: WebOptions, now: number): Promise<string> {
@@ -274,7 +332,7 @@ async function operatorPage(options: WebOptions, now: number): Promise<string> {
     const upstreams = check.dependsOn.map((id) => checks.get(id)).filter((upstream): upstream is Check => upstream !== undefined);
     return `<li class="panel">${checkRow(check, "private", view, true)}${upstreams.length ? `<p class="operator-dependencies panel-inset secondary">Requires ${upstreams.map((upstream) => `<a href="${checkPath(upstream, true)}">${escapeHtml(upstream.name)}</a>`).join(", ")}</p>` : ""}</li>`;
   });
-  return page("Operator status", `<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Public status</a><span aria-hidden="true">/</span><span aria-current="page">Private</span></nav><div class="page-heading"><h1>Operator status</h1><span class="private-marker">Private</span></div>${rows.length ? `<ul class="ungrouped">${rows.join("")}</ul>${legend}` : '<p class="panel empty secondary">No checks are configured.</p>'}`);
+  return page(options, "Operator status", `<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Public status</a><span aria-hidden="true">/</span><span aria-current="page">Private</span></nav><div class="page-heading"><h1>Operator status</h1><span class="private-marker">Private</span></div>${rows.length ? `<ul class="ungrouped">${rows.join("")}</ul>${legend}` : '<p class="panel empty secondary">No checks are configured.</p>'}`);
 }
 
 function historyPath(check: Check, operator: boolean, before: number, ceiling: number): string {
@@ -302,7 +360,7 @@ async function detail(options: WebOptions, requestUrl: URL, check: Check, now: n
   const cursor = requestUrl.searchParams.get("before");
   const until = cursor === null ? ceiling : Number(cursor);
   if (!Number.isSafeInteger(until) || until % MINUTE_MS !== 0 || until <= floor || until > ceiling) {
-    return html(page("Invalid history page", '<h1>Invalid history page</h1><p class="section"><a href="/">Return to service status</a></p>'), 400);
+    return html(page(options, "Invalid history page", '<h1>Invalid history page</h1><p class="section"><a href="/">Return to service status</a></p>'), 400);
   }
   const from = Math.max(floor, until - HISTORY_PAGE);
   const [run, daily, entries] = await Promise.all([
@@ -331,7 +389,7 @@ async function detail(options: WebOptions, requestUrl: URL, check: Check, now: n
   const dependencies = operator ? check.dependsOn.map((id) => checks.get(id)).filter((upstream): upstream is Check => upstream !== undefined) : [];
   const href = operator ? "/private" : "/";
   const name = escapeHtml(check.name);
-  return html(page(check.name, `<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="${href}">${operator ? "Operator status" : "Service status"}</a><span aria-hidden="true">/</span><span aria-current="page">${name}</span></nav><div class="detail-head"><h1>${name}</h1>${badge(stateOf(result), checkStateText(result))}</div>
+  return html(page(options, check.name, `<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="${href}">${operator ? "Operator status" : "Service status"}</a><span aria-hidden="true">/</span><span aria-current="page">${name}</span></nav><div class="detail-head"><h1>${name}</h1>${badge(stateOf(result), checkStateText(result))}</div>
   <dl class="facts"><div><dt>Latest latency</dt><dd class="number">${measurement ? `${measurement.latencyMs} ms` : "—"}</dd></div>${check.type === "http" ? `<div><dt>HTTP code</dt><dd class="number">${measurement?.httpCode ?? "—"}</dd></div>` : ""}<div><dt>Last reported</dt><dd>${run && measurement ? time(run.scheduledAt, true) : "—"}</dd></div>${operatorFacts}</dl>
   ${dependencyNote(check, checks, results, operator)}${dependencies.length ? `<p class="operator-dependencies secondary">Requires ${dependencies.map((upstream) => `<a href="${checkPath(upstream, true)}">${escapeHtml(upstream.name)}</a>`).join(", ")}</p>` : ""}
   <section class="section" aria-labelledby="daily-title"><div class="section-heading"><h2 id="daily-title">Daily summary</h2><p class="secondary">Latency for successful checks</p></div>${dailyTable(check, operator, rollupIndex(daily), now, ceiling)}</section>
@@ -351,8 +409,8 @@ function html(body: string, status = 200): Response {
   return response(body, status, { "Content-Type": "text/html; charset=utf-8" });
 }
 
-function notFound(): Response {
-  return html(page("Not found", '<h1>Page not found</h1><p class="section"><a href="/">Return to service status</a></p>'), 404);
+function notFound(options: WebOptions): Response {
+  return html(page(options, "Not found", '<h1>Page not found</h1><p class="section"><a href="/">Return to service status</a></p>'), 404);
 }
 
 function jsonStatus(body: { online: boolean; status: GroupState }, headers: Headers, code = 200): Response {
@@ -377,6 +435,45 @@ async function statusApi(options: WebOptions, request: Request, url: URL, now: n
   }
   const state = group ? groupState(group, liveResults(config.checks, await options.store.latest(), now)) : "unknown";
   return jsonStatus({ online: state === "operational", status: state }, headers);
+}
+
+async function embedStatusApi(options: WebOptions, request: Request, url: URL, now: number): Promise<Response> {
+  const headers = new Headers({ "Access-Control-Allow-Origin": "*" });
+  const unknown = { online: false, status: "unknown" } as const;
+  const checks = url.searchParams.getAll("check");
+  const groups = url.searchParams.getAll("group");
+  if (checks.length + groups.length > 1) return jsonStatus(unknown, headers, 400);
+  if (request.method === "OPTIONS") {
+    headers.set("Allow", "GET, HEAD, OPTIONS");
+    headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    return response(null, 204, headers);
+  }
+  const { config, store } = options;
+  try {
+    let state: GroupState = "unknown";
+    if (checks.length) {
+      const check = config.checks.find((candidate) => candidate.id === checks[0] && candidate.visibility === "public");
+      if (!check) return jsonStatus(unknown, headers, 404);
+      state = stateOf(currentResult(await store.latest(), check.id, now));
+    } else {
+      const group = config.groups.find((candidate) => candidate.id === (groups[0] ?? config.defaultGroup) && candidate.visibility !== "private");
+      if (!group && groups.length) return jsonStatus(unknown, headers, 404);
+      if (group) state = groupState(group, liveResults(config.checks, await store.latest(), now));
+    }
+    return jsonStatus({ online: state === "operational", status: state }, headers);
+  } catch {
+    return jsonStatus(unknown, headers, 503);
+  }
+}
+
+async function health(options: WebOptions): Promise<Response> {
+  let status = 200;
+  try {
+    await options.store.latest();
+  } catch {
+    status = 503;
+  }
+  return response(JSON.stringify(options.buildInfo ?? defaultBuild), status, { "Content-Type": "application/json; charset=utf-8" });
 }
 
 async function authenticated(request: Request, user: string, password: string): Promise<boolean> {
@@ -413,7 +510,7 @@ async function serve(options: WebOptions, request: Request): Promise<Response> {
   const path = url.pathname;
   const operator = path === "/private" || path.startsWith("/private/");
   if (operator) {
-    if (url.protocol !== "https:" || !options.privateUser || !options.privatePassword) return notFound();
+    if (url.protocol !== "https:" || !options.privateUser || !options.privatePassword) return notFound(options);
     if (!await authenticated(request, options.privateUser, options.privatePassword)) {
       return response("Authentication required", 401, {
         "Content-Type": "text/plain; charset=utf-8",
@@ -422,17 +519,24 @@ async function serve(options: WebOptions, request: Request): Promise<Response> {
       });
     }
   }
-  const api = path === "/api/status";
+  const embedApi = path === "/api/v1/status";
+  const api = embedApi || path === "/api/status";
   if (request.method !== "GET" && request.method !== "HEAD" && !(api && request.method === "OPTIONS")) {
-    return response("Method not allowed", 405, { Allow: api ? "GET, HEAD, OPTIONS" : "GET, HEAD" });
+    return response("Method not allowed", 405, {
+      Allow: api ? "GET, HEAD, OPTIONS" : "GET, HEAD",
+      ...(embedApi ? { "Access-Control-Allow-Origin": "*" } : {}),
+    });
   }
   const now = (options.now ?? Date.now)();
+  if (embedApi) return embedStatusApi(options, request, url, now);
   if (api) return statusApi(options, request, url, now);
+  if (path === "/healthz") return health(options);
+  if (path === "/embed") return html(embedPage(options));
   if (path === "/") return html(await dashboard(options, now));
   if (path === "/private" || path === "/private/") return html(await operatorPage(options, now));
   const id = matchMonitor(path, operator);
   const check = options.config.checks.find((candidate) => candidate.id === id && (operator || candidate.visibility === "public"));
-  return check ? detail(options, url, check, now, operator) : notFound();
+  return check ? detail(options, url, check, now, operator) : notFound(options);
 }
 
 export function createWebHandler(options: WebOptions): (request: Request) => Promise<Response> {
@@ -441,7 +545,7 @@ export function createWebHandler(options: WebOptions): (request: Request) => Pro
     try {
       served = await serve(options, request);
     } catch {
-      served = html(page("Service status unavailable", '<h1>Service status unavailable</h1><p class="section"><a href="/">Try again</a></p>'), 503);
+      served = html(page(options, "Service status unavailable", '<h1>Service status unavailable</h1><p class="section"><a href="/">Try again</a></p>'), 503);
     }
     if (new URL(request.url).pathname.startsWith("/private")) {
       served.headers.set("X-Robots-Tag", "noindex, nofollow");

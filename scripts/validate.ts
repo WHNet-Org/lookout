@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { validateConfig } from "../src/config.ts";
+import { readMonitorConfig } from "../src/config-file.ts";
 
 const files = process.argv.slice(2);
-for (const file of files.length > 0 ? files : ["monitors.json", "monitors.example.json"]) {
-  const config = validateConfig(JSON.parse(readFileSync(file, "utf8")));
+for (const file of files.length > 0 ? files : ["monitors.example.json"]) {
+  const config = readMonitorConfig(file);
   console.log(`${file}: ${config.checks.length} checks, ${config.groups.length} groups.`);
 }

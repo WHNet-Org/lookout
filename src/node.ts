@@ -4,15 +4,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createConnection } from "node:net";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { validateConfig } from "./config.ts";
+import { createBuildInfo } from "./build-info.ts";
+import { readMonitorConfig } from "./config-file.ts";
 import { MINUTE_MS, minuteAt } from "./model.ts";
 import { createScheduler } from "./scheduler.ts";
 import { migrateSqlite, sqliteDatabase } from "./sqlite.ts";
 import { createStore } from "./store.ts";
 import { createWebHandler } from "./web.ts";
 
-const configFile = process.env.LOOKOUT_CONFIG ?? new URL("../monitors.json", import.meta.url);
-const config = validateConfig(JSON.parse(readFileSync(configFile, "utf8")));
+const config = readMonitorConfig(process.env.LOOKOUT_CONFIG ?? "/etc/lookout/monitors.json");
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.LOOKOUT_HOST ?? "127.0.0.1";
 const trustProxy = process.env.LOOKOUT_TRUST_PROXY === "1";
@@ -41,6 +41,7 @@ const run = createScheduler({
 const handle = createWebHandler({
   config,
   store,
+  buildInfo: createBuildInfo(process.env.LOOKOUT_BUILD_SHA),
   privateUser: process.env.LOOKOUT_PRIVATE_USER,
   privatePassword: process.env.LOOKOUT_PRIVATE_PASSWORD,
 });
@@ -48,8 +49,13 @@ const handle = createWebHandler({
 const assets = new Map([
   ["/assets/lookout.svg", "image/svg+xml"],
   ["/assets/whnet-mosaic.svg", "image/svg+xml"],
+  ["/assets/whnet-grid.svg", "image/svg+xml"],
+  ["/assets/mosaic.css", "text/css; charset=utf-8"],
   ["/assets/styles.css", "text/css; charset=utf-8"],
   ["/assets/dashboard.js", "text/javascript; charset=utf-8"],
+  ["/assets/embed-guide.js", "text/javascript; charset=utf-8"],
+  ["/assets/lookout-status.js", "text/javascript; charset=utf-8"],
+  ["/assets/lookout-status.css", "text/css; charset=utf-8"],
   ["/assets/whnet-mosaic-LICENSE.txt", "text/plain; charset=utf-8"],
 ]);
 
@@ -113,7 +119,12 @@ async function handleIncoming(incoming: IncomingMessage, outgoing: ServerRespons
   if (contentType && (method === "GET" || method === "HEAD")) {
     const body = readFileSync(new URL(path.slice(1), new URL("../public/", import.meta.url)));
     await reply(new Response(body, {
-      headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff" },
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=300",
+        "X-Content-Type-Options": "nosniff",
+        ...(path === "/assets/lookout-status.js" || path === "/assets/lookout-status.css" ? { "Access-Control-Allow-Origin": "*" } : {}),
+      },
     }), outgoing, method === "HEAD");
     return;
   }

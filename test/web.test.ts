@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createBuildInfo } from "../src/build-info.ts";
 import { MINUTE_MS, type Check, type Config, type Run, type Store } from "../src/model.ts";
 import { createWebHandler } from "../src/web.ts";
 
@@ -89,6 +90,83 @@ test("public API uses an exact CORS allowlist and expires a sample after three s
   assert.match(dashboard, /Status unknown/);
   assert.match(dashboard, /56 ms/);
   assert.doesNotMatch(dashboard, /Upstream check also failing/);
+});
+
+test("embed status serves public scopes to every origin while hiding private or missing targets", async () => {
+  const state = fixture();
+  state.run.results.proxy = { ok: true, latencyMs: 10, httpCode: null };
+  let clock = now;
+  const serve = createWebHandler({ ...state, now: () => clock });
+  const request = (query = "", method = "GET") => serve(new Request(origin + "/api/v1/status" + query, {
+    method, headers: { Origin: "https://consumer.test", "Access-Control-Request-Method": "GET" },
+  }));
+  const healthy = await request("?check=proxy");
+  assert.equal(healthy.status, 200);
+  assert.equal(healthy.headers.get("access-control-allow-origin"), "*");
+  assert.equal(healthy.headers.has("access-control-allow-credentials"), false);
+  assert.deepEqual(await healthy.json(), { online: true, status: "operational" });
+  for (const query of ["", "?group=whnet", "?group=aggregate"]) {
+    assert.deepEqual(await (await request(query)).json(), { online: false, status: "outage" });
+  }
+  for (const [hidden, missing] of [
+    ["?check=private-db", "?check=never-configured"],
+    ["?group=redacted", "?group=never-configured"],
+  ]) {
+    const first = await request(hidden);
+    const second = await request(missing);
+    assert.equal(first.status, 404);
+    assert.equal(second.status, 404);
+    assert.deepEqual([...first.headers], [...second.headers]);
+    assert.equal(await first.text(), await second.text());
+  }
+  for (const query of ["?check=proxy&group=whnet", "?check=proxy&check=app"]) {
+    assert.equal((await request(query)).status, 400);
+  }
+  const head = await request("?check=proxy", "HEAD");
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+  const preflight = await request("?check=proxy", "OPTIONS");
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, HEAD, OPTIONS");
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
+  clock += 3 * MINUTE_MS;
+  assert.deepEqual(await (await request("?check=proxy")).json(), { online: false, status: "unknown" });
+  assert.deepEqual(state.dailyQueries, []);
+  assert.deepEqual(state.historyQueries, []);
+});
+
+test("shell and health surface the release identity and health detects storage failure", async () => {
+  const state = fixture();
+  const build = createBuildInfo("abcdef0123456789abcdef0123456789abcdef01");
+  const serve = createWebHandler({ ...state, now: () => now, buildInfo: build });
+  const healthy = await serve(new Request(origin + "/healthz"));
+  assert.equal(healthy.status, 200);
+  assert.deepEqual(await healthy.json(), build);
+  const head = await serve(new Request(origin + "/healthz", { method: "HEAD" }));
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+  const embed = await (await serve(new Request(origin + "/embed"))).text();
+  assert.match(embed, /href="\/embed" aria-current="page"/u);
+  assert.match(embed, /<footer class="site-footer">/u);
+  assert.match(embed, /class="build-label">v\d+\.\d+\.\d+ · <code[^>]+>abcdef0<\/code>/u);
+  assert.match(embed, /&lt;lookout-status group=&quot;whnet&quot; variant=&quot;card&quot;/u);
+  assert.match(embed, /&lt;lookout-status check=&quot;app&quot; variant=&quot;badge&quot;/u);
+  assert.doesNotMatch(embed, /Internal database only|private-db|private-credential|Hidden group name/u);
+  const dashboard = await (await serve(new Request(origin))).text();
+  assert.match(dashboard, /id="group-whnet"/u);
+  assert.doesNotMatch(dashboard, /id="group-redacted"/u);
+
+  const failed = createWebHandler({
+    ...state, buildInfo: build,
+    store: { ...state.store, latest: async () => { throw new Error("sensitive storage error"); } },
+  });
+  const unhealthy = await failed(new Request(origin + "/healthz"));
+  assert.equal(unhealthy.status, 503);
+  assert.deepEqual(await unhealthy.json(), build);
+  const unavailable = await failed(new Request(origin + "/api/v1/status?check=proxy"));
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.headers.get("access-control-allow-origin"), "*");
+  assert.deepEqual(await unavailable.json(), { online: false, status: "unknown" });
 });
 
 test("overlapping detailed groups link to the same public check and render its history once", async () => {
