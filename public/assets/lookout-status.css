@@ -1,7 +1,8 @@
 :host {
   display: inline-block;
+  min-inline-size: 0;
   max-inline-size: 100%;
-  color-scheme: light dark;
+  color-scheme: inherit;
   font: inherit;
 }
 
@@ -9,51 +10,111 @@
 
 .frame {
   box-sizing: border-box;
-  display: inline-flex;
-  flex-wrap: wrap;
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: .3em .65em;
+  gap: .5em;
   max-inline-size: 100%;
   min-block-size: 2rem;
-  padding: .25em .55em;
-  border: 1px solid light-dark(#d5cde1, #635474);
-  border-radius: .25rem;
-  background: var(--lookout-bg, light-dark(#fff, #262626));
-  color: var(--lookout-text, light-dark(#252232, #f4f4f4));
+  padding: .2em .3em;
+  border-radius: .25em;
+  background: var(--lookout-bg, transparent);
+  color: var(--lookout-text, light-dark(#262626, #f4f4f4));
   font-size: .875em;
   line-height: 1.35;
   overflow-wrap: anywhere;
   text-decoration: none;
 }
 
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .2em .55em;
+  min-inline-size: 0;
+}
+
 .frame[data-variant="card"] {
   display: grid;
-  justify-items: start;
+  gap: .65em;
+  inline-size: fit-content;
+  min-inline-size: min(100%, 13em);
   min-block-size: 4.25rem;
-  width: fit-content;
-  padding: .7rem .9rem;
-  border-inline-start: .25rem solid var(--tone, currentColor);
-  border-radius: .5rem;
+  padding: .65em .75em;
+  border: 1px solid light-dark(#d4d4d4, #525252);
+  border-inline-start: .1875em solid var(--tone);
+  border-radius: .5em;
+  background: var(--lookout-bg, light-dark(#fff, #262626));
   font-size: 1em;
 }
 
-.frame:hover .label { text-decoration: underline; text-underline-offset: .16em; }
-.frame:focus-visible { outline: 2px solid var(--lookout-focus, light-dark(#633f9e, #c7acff)); outline-offset: 3px; }
-.label { font-weight: 600; }
-.status { display: inline-flex; align-items: baseline; gap: .3em; color: var(--tone, currentColor); }
-.mark { flex: 0 0 1ch; font-weight: 700; text-align: center; }
+.frame[data-variant="card"] .summary {
+  display: grid;
+  justify-items: start;
+  gap: .35em;
+}
+
+.frame:is(:hover, :focus-visible) .label { text-decoration: underline; text-underline-offset: .19em; }
+.frame:focus-visible { outline: 2px solid var(--lookout-focus, light-dark(#0f6795, #fff)); outline-offset: 2px; }
+.label { min-inline-size: 0; font-weight: 600; }
+
+.status {
+  box-sizing: border-box;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: .35em;
+  max-inline-size: 100%;
+  padding: .18em .46em;
+  border-radius: .3em;
+  background: color-mix(in srgb, var(--tone) 13%, transparent);
+  color: var(--tone);
+  font-size: .875em;
+  font-weight: 650;
+}
+
+.mark {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 1.15em;
+  block-size: 1.15em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: .9em;
+  line-height: 1;
+}
+
+.destination {
+  display: grid;
+  place-items: center;
+  inline-size: .75em;
+  color: var(--lookout-text, light-dark(#5d5d5d, #c6c6c6));
+}
+
+.destination::before {
+  content: "";
+  box-sizing: border-box;
+  inline-size: .44em;
+  block-size: .44em;
+  border-block-start: .1em solid;
+  border-inline-end: .1em solid;
+  transform: rotate(45deg);
+}
+
+.destination:dir(rtl)::before { transform: rotate(-45deg); }
 
 [data-status="operational"] { --tone: var(--lookout-operational, light-dark(#16683e, #79dca3)); }
 [data-status="degraded"] { --tone: var(--lookout-degraded, light-dark(#765100, #f3cd73)); }
 [data-status="outage"] { --tone: var(--lookout-outage, light-dark(#9e2731, #ff9b9c)); }
-[data-status="unknown"], [data-status="unavailable"] { --tone: var(--lookout-unknown, light-dark(#5d5867, #c6c6c6)); }
+[data-status="unknown"], [data-status="unavailable"] { --tone: var(--lookout-unknown, light-dark(#595959, #c6c6c6)); }
 
 @media (pointer: coarse) {
   .frame { min-block-size: 2.75rem; }
 }
 
 @media (forced-colors: active) {
-  .frame { border-color: CanvasText; color: LinkText; }
-  .status { color: CanvasText; }
+  .frame, .destination { color: LinkText; }
+  .frame[data-variant="card"] { border-color: CanvasText; }
+  .status { background: transparent; color: CanvasText; }
   .frame:focus-visible { outline-color: Highlight; }
 }

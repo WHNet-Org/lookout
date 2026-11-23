@@ -166,7 +166,7 @@ Use the inclusive UTC minute boundaries printed by `verify:staging` and the vers
 
 ## Embed status
 
-Open `/embed` on your status site for examples. Load the module once and add one or more `<lookout-status>` elements. Use `check` for a public check, `group` for a published group, or omit both for the configured default group. The default is a badge. Choose `variant="card"` for a larger card. The child link remains available without JavaScript.
+Open `/embed` on your status site to preview each scope as a badge or card and copy its HTML. Load the module once and add one or more `<lookout-status>` elements. Use `check` for a public check, `group` for a published group, or omit both for the configured default group. The default badge fits inline with surrounding content. Choose `variant="card"` for a more prominent panel. The child link remains available without JavaScript.
 
 ```html
 <script type="module" src="https://status.example.com/assets/lookout-status.js"></script>

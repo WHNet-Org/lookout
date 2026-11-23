@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { chromium } from "playwright-core";
+import { chromium, type Locator } from "playwright-core";
 import { eventually, fixtureConfig, fixtureServer, launch } from "../test/support.ts";
 
 const fixture = await fixtureServer();
@@ -23,6 +23,10 @@ const artifacts = resolve(".artifacts", "browser");
 mkdirSync(artifacts, { recursive: true });
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 let consumerServer: ReturnType<typeof createServer> | undefined;
+
+function backgroundColor(locator: Locator) {
+  return locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+}
 
 try {
   const [, port] = await server.match(/Lookout listening on 127\.0\.0\.1:(\d+)/u);
@@ -159,7 +163,8 @@ try {
   assert.equal(chipRequests, 2);
   assert.equal(await chip.getByRole("link", { name: "Status unavailable" }).getAttribute("href"), "/");
 
-  const guide = await browser.newPage({ viewport: { width: 320, height: 850 } });
+  const guide = await browser.newPage({ colorScheme: "light", viewport: { width: 320, height: 850 } });
+  await guide.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
   await guide.goto(`${origin}/embed`);
   assert(await guide.getByRole("heading", { name: "Embed status" }).isVisible());
   const embedLink = guide.getByRole("navigation", { name: "Lookout", exact: true }).getByRole("link", { name: "Embed" });
@@ -172,16 +177,47 @@ try {
     getComputedStyle(button).textDecorationLine === "underline"));
   await guide.mouse.move(0, 0);
   assert(await guide.getByRole("contentinfo").evaluate((footer) => getComputedStyle(footer, "::before").height === "3px"));
-  assert((await guide.locator("[data-embed-code]").first().textContent())?.includes(`${origin}/assets/lookout-status.js`));
+  const overallExample = guide.locator(".embed-example").filter({ has: guide.getByRole("heading", { name: "Overall status" }) });
+  const overallPreview = overallExample.locator("lookout-status");
+  const appearance = overallExample.getByRole("group", { name: "Overall status appearance" });
+  const badge = appearance.getByRole("radio", { name: "Badge" });
+  const card = appearance.getByRole("radio", { name: "Card" });
+  assert(await badge.isChecked());
+  await badge.focus();
+  await badge.press("ArrowRight");
+  assert(await card.isChecked());
+  assert.equal(await overallPreview.getAttribute("variant"), "card");
+  assert.equal(await overallPreview.getByRole("link").evaluate((link) => getComputedStyle(link).colorScheme), "dark");
+  const code = overallExample.locator("[data-embed-code]");
+  const cardCode = await code.textContent();
+  assert(cardCode);
+  assert(cardCode.includes(`${origin}/assets/lookout-status.js`));
+  assert(cardCode.includes('variant="card"'));
+  await copy.click();
+  await overallExample.getByText("Code copied.", { exact: true }).waitFor();
+  assert(await copy.isVisible());
+  assert.equal(await guide.evaluate(() => navigator.clipboard.readText()), cardCode);
+  await card.press("ArrowLeft");
+  assert(await badge.isChecked());
+  assert.equal(await overallPreview.getAttribute("variant"), "badge");
+  assert((await code.textContent())?.includes('variant="badge"'));
   assert.equal(await guide.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await badge.blur();
   await guide.screenshot({ path: join(artifacts, "embed-guide.png"), fullPage: true });
+  await guide.setViewportSize({ width: 1400, height: 1050 });
+  await guide.screenshot({ path: join(artifacts, "embed-guide-desktop.png"), fullPage: true });
+  await guide.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: undefined }); });
+  await copy.click();
+  await overallExample.getByText("Code selected for copying.", { exact: true }).waitFor();
+  assert.equal(await guide.evaluate(() => getSelection()?.toString()), await code.textContent());
   await guide.close();
 
   const consumerMarkup = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light">
     <title>Consumer site</title>
     <script type="module" src="${origin}/assets/lookout-status.js"></script>
     <lookout-status id="overall" label="Main services"><a href="${origin}/">Status page</a></lookout-status>
-    <lookout-status id="duplicate" variant="card" label="All services"></lookout-status>
+    <div id="narrow"><lookout-status id="duplicate" variant="card" label="Team &lt;North&gt; &amp; East — EnterpriseConnectivityAndInfrastructureServices"></lookout-status></div>
     <lookout-status id="group" group="internal-group" variant="card" label="Internal systems"></lookout-status>
     <lookout-status id="check" check="edge" label="Edge gateway"></lookout-status>`;
   const hostPolicy = `default-src 'none'; script-src ${origin}; style-src ${origin}; connect-src ${origin}`;
@@ -196,7 +232,7 @@ try {
   assert.equal(await withoutModule.getByRole("link", { name: "Status page" }).getAttribute("href"), `${origin}/`);
   await withoutModule.close();
 
-  const consumer = await browser.newPage({ viewport: { width: 320, height: 850 } });
+  const consumer = await browser.newPage({ colorScheme: "light", viewport: { width: 320, height: 850 } });
   const consumerErrors: string[] = [];
   consumer.on("pageerror", (error) => consumerErrors.push(error.message));
   const requested = new Map<string, number>();
@@ -223,8 +259,30 @@ try {
   assert.equal(await checkLink.getAttribute("href"), `${origin}/monitors/edge`);
   assert.equal(await groupLink.getAttribute("href"), `${origin}/#group-internal-group`);
   assert(await eventually(async () => await groupLink.evaluate((element) => getComputedStyle(element).display) === "grid"));
+  const overallLink = consumer.locator("#overall").getByRole("link");
+  const narrowCard = consumer.locator("#narrow");
+  await narrowCard.evaluate((element) => { element.style.inlineSize = "9rem"; });
+  assert.equal(await narrowCard.locator('[part="label"]').textContent(), "Team <North> & East — EnterpriseConnectivityAndInfrastructureServices");
+  assert(await narrowCard.evaluate((element) => {
+    const frame = element.querySelector("lookout-status")?.shadowRoot?.querySelector("a");
+    return frame && frame.getBoundingClientRect().width <= element.clientWidth && frame.scrollWidth <= frame.clientWidth;
+  }));
+  const transparent = "rgba(0, 0, 0, 0)";
+  assert.equal(await backgroundColor(overallLink), transparent);
+  assert.notEqual(await backgroundColor(state("overall")), transparent);
+  const lightCard = await backgroundColor(groupLink);
+  assert.notEqual(lightCard, transparent);
+  await consumer.screenshot({ path: join(artifacts, "embed-consumer-light.png") });
+  await consumer.locator('meta[name="color-scheme"]').evaluate((meta) => meta.setAttribute("content", "dark"));
+  assert.notEqual(await backgroundColor(groupLink), lightCard);
+  assert.equal(await backgroundColor(overallLink), transparent);
+  await consumer.locator("#group").evaluate((element) => element.style.setProperty("--lookout-bg", "rgb(13, 38, 79)"));
+  assert.equal(await backgroundColor(groupLink), "rgb(13, 38, 79)");
+  await consumer.locator("#group").evaluate((element) => element.style.removeProperty("--lookout-bg"));
+  await consumer.screenshot({ path: join(artifacts, "embed-consumer-dark.png") });
   await consumer.keyboard.press("Tab");
   assert(await consumer.locator("#overall").evaluate((element) => element.shadowRoot?.activeElement?.tagName === "A"));
+  assert.equal(await overallLink.evaluate((element) => getComputedStyle(element).outlineStyle), "solid");
   await consumer.emulateMedia({ forcedColors: "active" });
   assert(await state("group").isVisible());
   assert.equal(await consumer.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
