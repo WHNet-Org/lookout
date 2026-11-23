@@ -1,6 +1,6 @@
 {
   "name": "lookout",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,6 +13,7 @@
     "test": "node --test --test-reporter=spec test/*.test.ts",
     "test:worker": "node scripts/worker-smoke.ts",
     "test:browser": "node scripts/browser-check.ts",
+    "verify": "npm run validate && npm run typecheck && npm test && npm run test:worker && npm run deploy -- --dry-run",
     "dev:worker": "wrangler dev --test-scheduled",
     "prepare:staging": "node scripts/prepare-staging.ts",
     "verify:staging": "node scripts/staging-check.ts",

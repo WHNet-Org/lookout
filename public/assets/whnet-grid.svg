@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="240" viewBox="0 0 144 240" fill="none">
+  <!-- One cell of the page's background: the lozenge of the home page's gems, 144 by 240, in the
+       dashed line of that illustration's guides, with its node at the top corner. Cells repeat
+       edge to edge, so the corners of one are the corners of its neighbours. The colours are the
+       illustration's own, dimmed to stay behind the text. -->
+  <path d="M0 120 72 0l72 120-72 120z" stroke="#534d61" stroke-opacity=".55" stroke-dasharray="3 6"/>
+  <g fill="#3f394c" stroke="#5b4b70" stroke-opacity=".7"><circle cx="72" cy="0" r="3"/><circle cx="72" cy="240" r="3"/></g>
+</svg>

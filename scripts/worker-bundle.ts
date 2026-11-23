@@ -3,7 +3,7 @@ import { basename, dirname, extname, relative, resolve, sep } from "node:path";
 import { build } from "esbuild";
 import type { Config } from "../src/model.ts";
 
-export function writeWorkerEntry(root: string, directory: string, name: string, config: Config): string {
+export function writeWorkerEntry(root: string, directory: string, name: string, config: Config, revision: string | null = null): string {
   const modulePath = (path: string) => relative(directory, resolve(root, path)).split(sep).join("/");
   writeFileSync(resolve(directory, "monitors.json"), JSON.stringify(config, null, 2) + "\n");
   const entry = `./${name}.ts`;
@@ -11,7 +11,7 @@ export function writeWorkerEntry(root: string, directory: string, name: string, 
     `import { createWorker } from "${modulePath("src/worker-app.ts")}";`,
     `import type { Config } from "${modulePath("src/model.ts")}";`,
     'import monitors from "./monitors.json" with { type: "json" };',
-    "const { handler, ProbeBatch } = createWorker(monitors as Config);",
+    `const { handler, ProbeBatch } = createWorker(monitors as Config, ${JSON.stringify(revision)});`,
     "export { ProbeBatch };",
     "export default handler;",
     "",
@@ -35,6 +35,7 @@ export async function splitWorker<T extends { main: string; minify?: boolean }>(
     platform: "neutral",
     target: "es2024",
     external: ["cloudflare:*"],
+    logLevel: "silent",
     minify,
     sourcemap: "linked",
     sourcesContent: false,

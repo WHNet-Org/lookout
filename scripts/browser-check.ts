@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
@@ -19,6 +22,7 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ??
 const artifacts = resolve(".artifacts", "browser");
 mkdirSync(artifacts, { recursive: true });
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+let consumerServer: ReturnType<typeof createServer> | undefined;
 
 try {
   const [, port] = await server.match(/Lookout listening on 127\.0\.0\.1:(\d+)/u);
@@ -34,6 +38,8 @@ try {
   await mobile.goto(origin);
   assert(await mobile.getByRole("heading", { name: "Some services are degraded" }).isVisible());
   assert(await mobile.getByRole("link", { name: "Refresh status" }).isVisible());
+  assert(await mobile.getByRole("navigation", { name: "Lookout", exact: true }).getByRole("link", { name: "Embed" }).isVisible());
+  assert(await mobile.getByRole("contentinfo").getByRole("link", { name: "Source" }).isVisible());
   assert.equal(await mobile.getByRole("link", { name: "Edge gateway" }).count(), 2);
   assert(await mobile.locator(".check-membership").getByRole("link", { name: "Edge gateway" }).isVisible());
   await mobile.screenshot({ path: join(artifacts, "mobile.png"), fullPage: true });
@@ -153,6 +159,108 @@ try {
   assert.equal(chipRequests, 2);
   assert.equal(await chip.getByRole("link", { name: "Status unavailable" }).getAttribute("href"), "/");
 
+  const guide = await browser.newPage({ viewport: { width: 320, height: 850 } });
+  await guide.goto(`${origin}/embed`);
+  assert(await guide.getByRole("heading", { name: "Embed status" }).isVisible());
+  const embedLink = guide.getByRole("navigation", { name: "Lookout", exact: true }).getByRole("link", { name: "Embed" });
+  assert.equal(await embedLink.getAttribute("aria-current"), "page");
+  assert(await embedLink.evaluate((link) => getComputedStyle(link).backgroundColor === "rgba(0, 0, 0, 0)" &&
+    getComputedStyle(link, "::after").opacity === "1"));
+  const copy = guide.getByRole("button", { name: "Copy overall status code" });
+  await copy.hover();
+  assert(await copy.evaluate((button) => getComputedStyle(button).backgroundColor === "rgba(0, 0, 0, 0)" &&
+    getComputedStyle(button).textDecorationLine === "underline"));
+  await guide.mouse.move(0, 0);
+  assert(await guide.getByRole("contentinfo").evaluate((footer) => getComputedStyle(footer, "::before").height === "3px"));
+  assert((await guide.locator("[data-embed-code]").first().textContent())?.includes(`${origin}/assets/lookout-status.js`));
+  assert.equal(await guide.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await guide.screenshot({ path: join(artifacts, "embed-guide.png"), fullPage: true });
+  await guide.close();
+
+  const consumerMarkup = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Consumer site</title>
+    <script type="module" src="${origin}/assets/lookout-status.js"></script>
+    <lookout-status id="overall" label="Main services"><a href="${origin}/">Status page</a></lookout-status>
+    <lookout-status id="duplicate" variant="card" label="All services"></lookout-status>
+    <lookout-status id="group" group="internal-group" variant="card" label="Internal systems"></lookout-status>
+    <lookout-status id="check" check="edge" label="Edge gateway"></lookout-status>`;
+  const hostPolicy = `default-src 'none'; script-src ${origin}; style-src ${origin}; connect-src ${origin}`;
+  consumerServer = createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": hostPolicy }).end(consumerMarkup);
+  });
+  consumerServer.listen(0, "127.0.0.1");
+  await once(consumerServer, "listening");
+  const consumerUrl = `http://127.0.0.1:${(consumerServer.address() as AddressInfo).port}/`;
+  const withoutModule = await browser.newPage({ javaScriptEnabled: false, viewport: { width: 320, height: 850 } });
+  await withoutModule.goto(consumerUrl);
+  assert.equal(await withoutModule.getByRole("link", { name: "Status page" }).getAttribute("href"), `${origin}/`);
+  await withoutModule.close();
+
+  const consumer = await browser.newPage({ viewport: { width: 320, height: 850 } });
+  const consumerErrors: string[] = [];
+  consumer.on("pageerror", (error) => consumerErrors.push(error.message));
+  const requested = new Map<string, number>();
+  consumer.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin === origin && url.pathname === "/api/v1/status") {
+      requested.set(url.search, (requested.get(url.search) ?? 0) + 1);
+    }
+  });
+  await consumer.clock.install({ time: clockStart });
+  await consumer.clock.pauseAt(clockStart + 1000);
+  await consumer.goto(consumerUrl);
+  await consumer.clock.runFor(1);
+  const state = (id: string) => consumer.locator(`#${id} .status`);
+  await Promise.all([
+    state("overall").getByText("Degraded").waitFor(),
+    state("duplicate").getByText("Degraded").waitFor(),
+    state("group").getByText("Operational").waitFor(),
+    state("check").getByText("Outage").waitFor(),
+  ]);
+  assert.deepEqual(Object.fromEntries(requested), { "": 1, "?group=internal-group": 1, "?check=edge": 1 });
+  const checkLink = consumer.locator("#check").getByRole("link");
+  const groupLink = consumer.locator("#group").getByRole("link");
+  assert.equal(await checkLink.getAttribute("href"), `${origin}/monitors/edge`);
+  assert.equal(await groupLink.getAttribute("href"), `${origin}/#group-internal-group`);
+  assert(await eventually(async () => await groupLink.evaluate((element) => getComputedStyle(element).display) === "grid"));
+  await consumer.keyboard.press("Tab");
+  assert(await consumer.locator("#overall").evaluate((element) => element.shadowRoot?.activeElement?.tagName === "A"));
+  await consumer.emulateMedia({ forcedColors: "active" });
+  assert(await state("group").isVisible());
+  assert.equal(await consumer.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await consumer.screenshot({ path: join(artifacts, "embed-consumer.png") });
+
+  async function setHidden(hidden: boolean) {
+    await consumer.evaluate((value) => {
+      Object.defineProperty(document, "hidden", { configurable: true, value });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, hidden);
+  }
+  await consumer.clock.runFor(59_000);
+  await setHidden(true);
+  await consumer.clock.runFor(61_000);
+  assert.deepEqual(Object.fromEntries(requested), { "": 1, "?group=internal-group": 1, "?check=edge": 1 });
+
+  const globalUrl = `${origin}/api/v1/status`;
+  await consumer.route(globalUrl, (route) => route.abort());
+  await setHidden(false);
+  await consumer.clock.runFor(1);
+  await state("overall").getByText("Status unavailable").waitFor();
+  await state("duplicate").getByText("Status unavailable").waitFor();
+  assert.equal(requested.get(""), 2);
+  await consumer.unroute(globalUrl);
+  await consumer.route(globalUrl, (route) => route.fulfill({
+    headers: { "Access-Control-Allow-Origin": "*" }, json: { online: false, status: "unknown" },
+  }));
+  await consumer.clock.runFor(60_000);
+  await state("overall").getByText("Status unknown").waitFor();
+  await consumer.unroute(globalUrl);
+  await consumer.clock.runFor(60_000);
+  await state("overall").getByText("Degraded").waitFor();
+  assert.equal(requested.get(""), 4);
+  assert.deepEqual(consumerErrors, []);
+  await consumer.close();
+
   const siblingFolder = resolve("../whnet.ca/src/brand/listings");
   const logoSamples = ["taida", "qiao", "northstar", "spotistats"].map((id) => join(siblingFolder, `${id}.svg`));
   if (logoSamples.every(existsSync)) {
@@ -163,9 +271,10 @@ try {
         `<img src="data:image/svg+xml;base64,${src}" width="${size}" height="${size}">`).join("")}</p>`).join("")}</body>`);
     await brand.screenshot({ path: join(artifacts, "brand-family.png") });
   }
-  console.log(`Browser layout, keyboard, forced colors, no-JS, refresh, and branding passed. Screenshots in ${artifacts}`);
+  console.log(`Browser layout, cross-origin status embeds, keyboard, forced colors, no-JS, refresh, and branding passed. Screenshots in ${artifacts}`);
 } finally {
   await browser?.close();
+  if (consumerServer) await new Promise<void>((resolve) => consumerServer!.close(() => resolve()));
   await server.stop();
   await fixture.close();
   rmSync(directory, { recursive: true, force: true });

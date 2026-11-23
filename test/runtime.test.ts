@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { validateConfig } from "../src/config.ts";
@@ -12,12 +13,38 @@ import { migrateSqlite, sqliteDatabase } from "../src/sqlite.ts";
 import { createStore } from "../src/store.ts";
 import { eventually, fixtureConfig, fixtureServer, launch } from "./support.ts";
 
+test("standalone rejects missing and invalid external configuration before opening SQLite or listening", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "lookout-config-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "monitors.json");
+  const dbPath = join(directory, "lookout.sqlite");
+  const privateMarker = "private-config-marker";
+  const env = { ...process.env, LOOKOUT_CONFIG: path, LOOKOUT_DB: dbPath, PORT: "0" };
+  const cases = [
+    { source: undefined, error: /Could not read monitor configuration.*LOOKOUT_CONFIG/u },
+    { source: privateMarker, error: /must contain valid JSON/u },
+    { source: JSON.stringify({ checks: [], [privateMarker]: true }), error: /does not match the Lookout schema/u },
+  ];
+
+  for (const { source, error } of cases) {
+    if (source !== undefined) writeFileSync(path, source);
+    const child = spawnSync(process.execPath, ["src/node.ts"], { env, encoding: "utf8", timeout: 5_000 });
+    assert.ifError(child.error);
+    assert.equal(child.status, 1, child.stderr);
+    assert.match(child.stderr, error);
+    assert(!child.stderr.includes(privateMarker));
+    assert(!child.stdout.includes("Lookout listening"));
+    assert(!existsSync(dbPath));
+  }
+});
+
 test("standalone entry runs twenty checks, sends one cascade, and keeps state on restart", async () => {
   const fixture = await fixtureServer();
   const directory = mkdtempSync(join(tmpdir(), "lookout-node-"));
   const path = join(directory, "monitors.json");
   const dbPath = join(directory, "lookout.sqlite");
-  writeFileSync(path, JSON.stringify(fixtureConfig(fixture.origin, fixture.port)));
+  const config = fixtureConfig(fixture.origin, fixture.port);
+  writeFileSync(path, JSON.stringify(config));
   const env = {
     ...process.env,
     PORT: "0",
@@ -62,11 +89,16 @@ test("standalone entry runs twenty checks, sends one cascade, and keeps state on
     database.close();
 
     fixture.state.cascade = false;
-    server = launch(process.execPath, ["src/node.ts"], { env });
+    config.checks[1].name = "Updated application name";
+    writeFileSync(path, JSON.stringify(config));
+    server = launch(process.execPath, ["src/node.ts"], {
+      env: { ...env, LOOKOUT_CONFIG: relative(process.cwd(), path) },
+    });
     [, port] = await server.match(/Lookout listening on 127\.0\.0\.1:(\d+)/u);
     origin = `http://127.0.0.1:${port}`;
     const history = await (await fetch(`${origin}/monitors/application`)).text();
     assert.match(history, /503/u);
+    assert.match(history, /Updated application name/u);
     database = new DatabaseSync(dbPath, { readOnly: true });
     assert.deepEqual(database.prepare("SELECT scheduled_at FROM runs ORDER BY scheduled_at").all().slice(0, before.length), before);
     database.close();

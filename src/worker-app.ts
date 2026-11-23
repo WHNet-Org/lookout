@@ -1,6 +1,7 @@
 import { connect } from "cloudflare:sockets";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { D1Database } from "@cloudflare/workers-types";
+import { createBuildInfo } from "./build-info.ts";
 import type { Config, Results } from "./model.ts";
 import { createScheduler } from "./scheduler.ts";
 import { createStore } from "./store.ts";
@@ -61,7 +62,8 @@ function probeOptions(env: Env) {
   };
 }
 
-export function createWorker(config: Config) {
+export function createWorker(config: Config, revision?: string | null) {
+  const buildInfo = createBuildInfo(revision);
   const checksById = new Map(config.checks.map((check) => [check.id, check]));
   const ids = config.checks.map(({ id }) => id);
   const batches: string[][] = [];
@@ -92,6 +94,7 @@ export function createWorker(config: Config) {
       const handle = createWebHandler({
         config,
         store: createStore(workerDatabase(env.DB)),
+        buildInfo,
         privateUser: env.LOOKOUT_PRIVATE_USER,
         privatePassword: env.LOOKOUT_PRIVATE_PASSWORD,
       });

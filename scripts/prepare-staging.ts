@@ -18,7 +18,7 @@ interface BaseConfiguration {
   compatibility_flags: string[];
   triggers: { crons: string[] };
   observability: { enabled: boolean };
-  assets: { directory: string; binding: string; run_worker_first: boolean };
+  assets: { directory: string; binding: string; run_worker_first: boolean | string[] };
   d1_databases: [{ binding: string; database_id: string; database_name: string; migrations_dir: string }];
 }
 
