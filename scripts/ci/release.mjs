@@ -10,7 +10,8 @@ async function publishRelease(env) {
 
   const url = `${env.CI_API_V4_URL}/projects/${env.CI_PROJECT_ID}/releases`;
   const image = `${env.CI_REGISTRY_IMAGE}@${digest}`;
-  const description = `Linux amd64 container for commit \`${revision}\`.\n\nPull the tested image by digest.\n\n\`\`\`sh\ndocker pull ${image}\n\`\`\``;
+  const source = `https://github.com/WHNet-Org/lookout/tree/${revision}`;
+  const description = `Linux amd64 container for commit \`${revision}\`.\n\n[Source code](${source}) · AGPL-3.0-only\n\nPull the tested image by digest.\n\n\`\`\`sh\ndocker pull ${image}\n\`\`\``;
   const options = {
     headers: { "JOB-TOKEN": env.CI_JOB_TOKEN, "Content-Type": "application/json" },
     redirect: "error",

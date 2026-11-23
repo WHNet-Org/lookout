@@ -149,6 +149,7 @@ test("shell and health surface the release identity and health detects storage f
   assert.match(embed, /href="\/embed" aria-current="page"/u);
   assert.match(embed, /<footer class="site-footer">/u);
   assert.match(embed, /class="build-label">v\d+\.\d+\.\d+ · <code[^>]+>abcdef0<\/code>/u);
+  assert.match(embed, /href="https:\/\/github\.com\/WHNet-Org\/lookout\/tree\/abcdef0123456789abcdef0123456789abcdef01">Source code<\/a>/u);
   assert.match(embed, /&lt;lookout-status group=&quot;whnet&quot; variant=&quot;card&quot;/u);
   assert.match(embed, /&lt;lookout-status check=&quot;app&quot; variant=&quot;badge&quot;/u);
   assert.doesNotMatch(embed, /Internal database only|private-db|private-credential|Hidden group name/u);

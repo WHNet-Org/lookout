@@ -195,3 +195,11 @@ make check
 ```
 
 The local Worker and standalone smoke tests exercise twenty probes and a webhook cascade against synthetic targets. The browser check uses Chromium, with an optional `PLAYWRIGHT_CHROMIUM_EXECUTABLE` override, and saves desktop, mobile, and brand review images under `.artifacts/browser/`.
+
+## License
+
+Copyright © 2026 Samuel Gagnon. Lookout is licensed under the GNU Affero General Public License, version 3 only. [AGPL-3.0-only](LICENSE)
+
+The footer links to the source for the running Lookout revision. If you deploy a modified version, update the source link to offer the corresponding source for your version. [GNU AGPL guidance](https://www.gnu.org/licenses/gpl-howto.html)
+
+The WHNet mosaic artwork and RE2JS retain their MIT notices. [Mosaic notice](public/assets/whnet-mosaic-LICENSE.txt) · [RE2JS notice](public/assets/re2js-LICENSE.txt)

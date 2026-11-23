@@ -4,6 +4,7 @@ ARG LOOKOUT_VERSION
 ARG SOURCE_COMMIT=unknown
 LABEL org.opencontainers.image.title="Lookout" \
       org.opencontainers.image.source="https://github.com/WHNet-Org/lookout" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.version="$LOOKOUT_VERSION" \
       org.opencontainers.image.revision="$SOURCE_COMMIT"
 
@@ -16,6 +17,7 @@ RUN node -e 'const pkg = require("./package.json"); const lock = require("./pack
 COPY src/ ./src/
 COPY public/ ./public/
 COPY migrations/ ./migrations/
+COPY LICENSE ./
 
 ENV NODE_ENV=production \
     LOOKOUT_HOST=0.0.0.0 \
