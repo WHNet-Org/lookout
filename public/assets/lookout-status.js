@@ -3,7 +3,7 @@ const states = {
   degraded: ["!", "Degraded"],
   outage: ["×", "Outage"],
   unknown: ["–", "Status unknown"],
-  unavailable: ["–", "Status unavailable"],
+  unavailable: ["?", "Status unavailable"],
 };
 const refreshInterval = 60_000;
 const moduleOrigin = new URL(import.meta.url).origin;
@@ -114,6 +114,8 @@ class LookoutStatus extends HTMLElement {
     this.#frame = document.createElement("a");
     this.#frame.className = "frame";
     this.#frame.setAttribute("part", "frame");
+    const summary = document.createElement("span");
+    summary.className = "summary";
     this.#label = document.createElement("span");
     this.#label.className = "label";
     this.#label.setAttribute("part", "label");
@@ -126,7 +128,11 @@ class LookoutStatus extends HTMLElement {
     this.#mark.setAttribute("aria-hidden", "true");
     this.#value = document.createElement("span");
     status.append(this.#mark, this.#value);
-    this.#frame.append(this.#label, status);
+    summary.append(this.#label, status);
+    const destination = document.createElement("span");
+    destination.className = "destination";
+    destination.setAttribute("aria-hidden", "true");
+    this.#frame.append(summary, destination);
     root.append(style, this.#frame);
     this.#render("unknown");
   }

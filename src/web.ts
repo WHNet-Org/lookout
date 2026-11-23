@@ -204,33 +204,53 @@ function embedPage(options: WebOptions): string {
   const check = options.config.checks.find((candidate) => candidate.visibility === "public");
   const group = options.config.groups.find((candidate) => candidate.visibility !== "private");
   const samples = [
-    { title: "Overall status", label: "Service status", scope: "", path: "/", variant: "badge", preview: true },
     {
-      title: "Service group", label: group?.name ?? "Services", scope: ` group="${escapeHtml(group?.id ?? "my-group")}"`,
-      path: `/#${groupAnchor(group?.id ?? "my-group")}`, variant: "card", preview: Boolean(group),
+      id: "overall", title: "Overall status", label: "Service status", scope: "", path: "/", variant: "badge",
+      description: "Show the status of your default service group on another site.",
     },
     {
-      title: "Single check", label: check?.name ?? "Service", scope: ` check="${escapeHtml(check?.id ?? "my-check")}"`,
-      path: check ? checkPath(check) : "/monitors/my-check", variant: "badge", preview: Boolean(check),
+      id: "group", title: "Service group", label: group?.name ?? "Services", scope: ` group="${escapeHtml(group?.id ?? "my-group")}"`,
+      path: `/#${groupAnchor(group?.id ?? "my-group")}`, variant: "card",
+      description: "Show the combined status of a published group.",
+      missing: group ? undefined : "Publish a service group to enable a live preview.",
+    },
+    {
+      id: "check", title: "Single check", label: check?.name ?? "Service", scope: ` check="${escapeHtml(check?.id ?? "my-check")}"`,
+      path: check ? checkPath(check) : "/monitors/my-check", variant: "badge",
+      description: "Show the status of one public check and link to its history.",
+      missing: check ? undefined : "Publish a check to enable a live preview.",
     },
   ];
-  const cards = samples.map(({ title, label, scope, path, variant, preview }) => {
+  const cards = samples.map(({ id, title, label, scope, path, variant, description, missing }) => {
     const markup = (origin: string) => `<lookout-status${scope} variant="${variant}" label="${escapeHtml(label)}">
   <a href="${origin}${path}">${escapeHtml(label)}</a>
 </lookout-status>`;
     const code = `<script type="module" src="${exampleOrigin}/assets/lookout-status.js"></script>
 ${markup(exampleOrigin)}`;
+    const appearance = [["badge", "Badge"], ["card", "Card"]].map(([value, text]) =>
+      `<label><input type="radio" name="${id}-appearance" value="${value}"${variant === value ? " checked" : ""}>${text}</label>`).join("");
     return `<article class="panel embed-example">
-      <div class="embed-example-head"><h2>${title}</h2><button type="button" class="quiet-control" data-embed-copy aria-label="Copy ${title.toLowerCase()} code" hidden>Copy</button></div>
-      ${preview ? `<div class="embed-preview">${markup("")}</div>` : ""}
-      <pre tabindex="0" aria-label="${title} code"><code data-embed-code>${escapeHtml(code)}</code></pre>
+      <header class="embed-example-head"><h2>${title}</h2><p class="secondary">${description}</p></header>
+      <div class="embed-example-body">
+        <div class="embed-demo">
+          <fieldset class="embed-appearance" hidden><legend class="sr-only">${title} appearance</legend>${appearance}</fieldset>
+          <div class="embed-preview">${missing ? `<p class="secondary">${missing}</p>` : markup("")}</div>
+        </div>
+        <div class="embed-code">
+          <div class="embed-code-actions" hidden>
+            <span class="secondary" data-embed-feedback role="status"></span>
+            <button type="button" class="quiet-control" data-embed-copy aria-label="Copy ${title.toLowerCase()} code">Copy</button>
+          </div>
+          <pre tabindex="0" aria-label="${title} code"><code data-embed-code>${escapeHtml(code)}</code></pre>
+        </div>
+      </div>
     </article>`;
   });
   return page(options, "Embed status", `<div class="page-heading"><h1>Embed status</h1></div>
-  <p class="secondary embed-intro">Add a live Lookout badge or card to another website. Load the module once per page. Use a published check or group ID, or omit both for overall status.</p>
+  <p class="secondary embed-intro">Choose a scope and appearance, then copy the HTML into your site. Load the Lookout module once per page. For a group or check, use its published ID.</p>
+  <noscript><p class="secondary">Replace <code>https://status.example.com</code> in the HTML with this status site’s origin.</p></noscript>
   <div class="embed-examples">${cards.join("")}</div>
-  <p class="embed-note secondary">If your site uses a Content Security Policy, allow this Lookout origin in <code>script-src</code>, <code>style-src</code>, and <code>connect-src</code>.</p>
-  <p data-embed-feedback role="status" class="sr-only"></p>`, "embed");
+  <p class="embed-note secondary">If your site uses a Content Security Policy, allow this Lookout origin in <code>script-src</code>, <code>style-src</code>, and <code>connect-src</code>.</p>`, "embed");
 }
 
 function checkLink(check: Check, placement: string, operator = false): string {

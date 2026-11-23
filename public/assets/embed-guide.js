@@ -1,21 +1,41 @@
-const feedback = document.querySelector("[data-embed-feedback]");
 for (const example of document.querySelectorAll(".embed-example")) {
   const code = example.querySelector("[data-embed-code]");
-  code.textContent = code.textContent.replaceAll("https://status.example.com", location.origin);
-  if (!navigator.clipboard?.writeText) continue;
+  const preview = example.querySelector("lookout-status");
+  const appearance = example.querySelector(".embed-appearance");
   const button = example.querySelector("[data-embed-copy]");
-  button.hidden = false;
+  const feedback = example.querySelector("[data-embed-feedback]");
+  const source = code.textContent.replace(
+    /^( *<(?:script type="module" src|a href)=")https:\/\/status\.example\.com(?=\/)/gmu,
+    (_match, prefix) => prefix + location.origin,
+  );
+  let reset;
+
+  function updateAppearance() {
+    const variant = appearance.querySelector(":checked").value;
+    preview?.setAttribute("variant", variant);
+    code.textContent = source.replace(/^(<lookout-status[^\n]*? variant=")(?:badge|card)(?=")/mu,
+      (_match, prefix) => prefix + variant);
+    clearTimeout(reset);
+    feedback.textContent = "";
+  }
+
+  updateAppearance();
+  appearance.hidden = false;
+  appearance.addEventListener("change", updateAppearance);
+  button.parentElement.hidden = false;
   button.addEventListener("click", async () => {
+    const html = code.textContent;
+    let message = "Code copied.";
     try {
-      await navigator.clipboard.writeText(code.textContent);
-      feedback.textContent = "Embed code copied.";
+      await navigator.clipboard.writeText(html);
+      if (code.textContent !== html) return;
     } catch {
-      const range = document.createRange();
-      range.selectNodeContents(code);
       const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      feedback.textContent = "Code selected for copying.";
+      selection?.selectAllChildren(code);
+      message = selection ? "Code selected for copying." : "Select the HTML to copy it.";
     }
+    clearTimeout(reset);
+    feedback.textContent = message;
+    reset = setTimeout(() => { feedback.textContent = ""; }, 2500);
   });
 }
