@@ -96,12 +96,11 @@ img { display: block; max-inline-size: 100%; block-size: auto; }
 .skip:focus { transform: none; }
 
 .mast {
-  --masthead-scrim: rgb(22 22 22 / .72);
-  --masthead-feather: clamp(1.5rem, 4vw, 4rem);
-  --masthead-protect: calc(var(--masthead-edge) + 17.5rem);
+  --masthead-glaze: linear-gradient(to bottom, rgb(22 22 22 / .26), rgb(22 22 22 / .24));
   position: sticky;
   inset-block-start: 0;
   z-index: 10;
+  padding-block: .25rem;
   border-block-end: 1px solid var(--border);
   background: var(--surface) url("./whnet-mosaic.svg") center / 100% 100% no-repeat;
   color: #fff;
@@ -111,16 +110,40 @@ img { display: block; max-inline-size: 100%; block-size: auto; }
   position: absolute;
   inset: 0;
   z-index: -1;
-  background-image: linear-gradient(to right,
-    var(--masthead-scrim) var(--masthead-protect),
-    transparent calc(var(--masthead-protect) + var(--masthead-feather)));
+  background-image: var(--masthead-glaze);
 }
 .mast-inner {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0 clamp(.55rem, 1.7vw, 1.7rem);
-  min-block-size: var(--nav-height);
+  min-block-size: 3rem;
+  padding: 2px 1.1rem;
+  border-radius: 62.5rem;
+  overflow: hidden;
+  background: rgb(22 22 22 / .38);
+  backdrop-filter: blur(6px) saturate(1.25);
+  -webkit-backdrop-filter: blur(6px) saturate(1.25);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .5),
+    inset 0 -1px 0 rgb(255 255 255 / .16),
+    inset 1px 0 0 rgb(255 255 255 / .22),
+    inset -1px 0 0 rgb(255 255 255 / .22),
+    0 8px 28px rgb(0 0 0 / .38),
+    0 1px 3px rgb(0 0 0 / .28);
+}
+.mast-inner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(255 255 255 / .08) 0%, transparent 45%, rgb(255 255 255 / .03) 100%);
+}
+.mast-inner > * {
+  position: relative;
+  z-index: 1;
 }
 .brand {
   display: inline-flex;
@@ -132,6 +155,8 @@ img { display: block; max-inline-size: 100%; block-size: auto; }
   letter-spacing: .01em;
   text-decoration: none;
 }
+.mast .brand,
+.mast-nav a { text-shadow: 0 1px 2px rgb(0 0 0 / .35); }
 .brand img { inline-size: 2rem; block-size: 2rem; }
 .mast-nav { display: flex; flex-wrap: wrap; align-self: stretch; gap: .15rem; }
 .mast-nav a {
@@ -148,7 +173,7 @@ img { display: block; max-inline-size: 100%; block-size: auto; }
 .mast-nav a::after {
   content: "";
   position: absolute;
-  inset: auto .72rem 0;
+  inset: auto .72rem .15rem;
   block-size: 2px;
   border-radius: 2px 2px 0 0;
   background: currentColor;
@@ -195,15 +220,22 @@ button.quiet-control { cursor: pointer; }
   .footer-nav { justify-content: flex-end; }
 }
 
+@media (width < 40rem) {
+  .mast-inner { inline-size: min(100% - 1rem, var(--measure)); gap: 0 .4rem; padding: 2px .6rem; border-radius: .875rem; }
+  .mast-nav a { padding-inline: .55rem; }
+  .mast-nav a::after { inset-inline: .55rem; }
+}
+
 @media (max-width: 19rem) {
   :root { scroll-padding-block-start: 0; }
   .mast { position: relative; }
-  .mast::before { background: var(--masthead-scrim); }
+  .mast-inner { border-radius: 1.25rem; }
 }
 
 @media (forced-colors: active) {
-  body::before, .mast::before, .site-footer::before { display: none; background-image: none; }
+  body::before, .mast::before, .mast-inner::after, .site-footer::before { display: none; background-image: none; }
   .mast { background: Canvas; border-color: CanvasText; }
+  .mast-inner { background: Canvas; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .brand, .mast-nav a, .footer-nav a, .quiet-control { color: LinkText; }
   .mast-nav a::after { background: Highlight; forced-color-adjust: none; }
   .site-footer { border-block-start: 1px solid CanvasText; }
